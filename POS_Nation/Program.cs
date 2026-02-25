@@ -28,7 +28,7 @@ namespace POS_Nation
                 {
                     try
                     {
-                        /*if (current.StoreSettings.StoreId == 12256)
+                        /*if (current.StoreSettings.StoreId == 12857)
                         {
                             Console.WriteLine("fetching storeid_ = " + current.StoreSettings.StoreId);
                         }
