@@ -28,11 +28,11 @@ namespace POS_Nation
                 {
                     try
                     {
-                        /*if (current.StoreSettings.StoreId == 12857)
-                        {
-                            Console.WriteLine("fetching storeid_ = " + current.StoreSettings.StoreId);
-                        }
-                        else { continue; }*/
+                        //if (current.StoreSettings.StoreId == 12993)
+                        //{
+                        //    Console.WriteLine("fetching storeid_ = " + current.StoreSettings.StoreId);
+                        //}
+                        //else { continue; }
                         var data = GetData(current.StoreSettings.StoreId, current.StoreSettings.POSSettings.Username, current.StoreSettings.POSSettings.Password, current.StoreSettings.POSSettings.AuthUrl, current.StoreSettings.POSSettings.ItemUrl, current.StoreSettings.POSSettings.FtpUserName, current.StoreSettings.POSSettings.FtpPassword);
                         var jObj = (JObject.Parse(data)["data"]);
                         Dictionary<object, object> dictObj = jObj.ToObject<Dictionary<object, object>>();
@@ -102,7 +102,7 @@ namespace POS_Nation
                     responseData = response.Content.ReadAsStringAsync().Result;
                     response.EnsureSuccessStatusCode();
                 }).Wait();
-                File.WriteAllText("Invetory_Info.json", responseData);
+               // File.WriteAllText("Invetory_Info.json", responseData);
                 return responseData;
             }
             catch (Exception ex)
@@ -133,6 +133,7 @@ namespace POS_Nation
             string Deposit = ConfigurationManager.AppSettings.Get("Deposit");
             string UOM_REMOVE = ConfigurationManager.AppSettings.Get("UOM_REMOVE");  
             string showtoweb= ConfigurationManager.AppSettings.Get("showtoweb");
+            string removeNumericPrefix = ConfigurationManager.AppSettings.Get("RemoveNumericPrefix");
             List<Modifier> xmd = new List<Modifier>();
 
             try
@@ -191,13 +192,20 @@ namespace POS_Nation
                         {
                             b = b.Replace("\n", String.Empty);
                         }
-
+                        if (removeNumericPrefix.Contains(storeid.ToString()))
+                        {
+                            b = Regex.Replace(b, @"^\d+\s*-\s*", "").Trim();
+                        }
                         pdf.StoreProductName = b;
                         fdf.pname = b;
                         string a = item.name;
                         if (a.Contains("\n"))
                         {
                             a = a.Replace("\n", String.Empty);
+                        }
+                        if (removeNumericPrefix.Contains(storeid.ToString()))
+                        {
+                            a = Regex.Replace(a, @"^\d+\s*-\s*", "").Trim();
                         }
                         pdf.StoreDescription = a.Trim();
                         fdf.pdesc = a.Trim();
