@@ -1,12 +1,14 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
+using System.IO;
 using System.Linq;
+using System.Runtime;
 using System.Text;
 using System.Threading.Tasks;
-using Newtonsoft.Json;
 
 namespace POS_Nation.Models
 {
@@ -21,16 +23,48 @@ namespace POS_Nation.Models
             {
                 List<SqlParameter> sparams = new List<SqlParameter>();
                 sparams.Add(new SqlParameter("@PosId", 75));
-                string constr = ConfigurationManager.AppSettings.Get("LiquorAppsConnectionString");
+
+                // string constr = ConfigurationManager.AppSettings.Get("LiquorAppsConnectionString");
+
+                //Handling missing dbsettings.json File 
+                string constr = ConfigurationManager.AppSettings["LiquorAppsConnectionString"];
+                Console.WriteLine("constr-from-Appconfig " + constr);
+                // If App.config doesn't have the connection string, use dbsettings.json
+                if (string.IsNullOrWhiteSpace(constr))
+                {
+                    string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "dbsettings.json");
+
+                    if (File.Exists(filePath))
+                    {
+                        try
+                        {
+                            DbSettings dbcon = JsonConvert.DeserializeObject<DbSettings>(
+                                File.ReadAllText(filePath));
+
+                            if (dbcon?.liquorappsconnectionstring != null &&
+                                dbcon.liquorappsconnectionstring.Count > 0)
+                            {
+                                // Local connection string
+                                constr = dbcon.liquorappsconnectionstring[1]; // [0] is for local & [1] for live db 
+                                Console.WriteLine("constr-2 " + constr);
+                            }
+                        }
+                        catch
+                        {
+                            // Ignore and handle if constr is still null
+                        }
+                    }
+                }
+
                 using (SqlConnection con = new SqlConnection(constr))
                 {
                     using (SqlCommand cmd = new SqlCommand())
                     {
                         cmd.Connection = con;
                         cmd.CommandText = "usp_ts_GetStorePosSetting";
-                        cmd.Parameters.Add(sparams[0]);
+                           cmd.Parameters.Add(sparams[0]);
                         cmd.CommandType = CommandType.StoredProcedure;
-                        using (SqlDataAdapter da= new SqlDataAdapter())
+                        using (SqlDataAdapter da = new SqlDataAdapter())
                         {
                             da.SelectCommand = cmd;
                             da.Fill(dsResult);
@@ -49,6 +83,17 @@ namespace POS_Nation.Models
                         pobj.PosName = dr["PosName"].ToString();
                         pobj.PosId = Convert.ToInt32(dr["PosId"]);
                         pobj.StoreSettings = obj;
+
+                        // NEW - 2026-09-18 - Read DB "Config" column for new stores (same as PTECH). Column-existence guard keeps old stores/schema working.
+                        if (dsResult.Tables[0].Columns.Contains("Config") && dr["Config"] != DBNull.Value && !string.IsNullOrWhiteSpace(dr["Config"].ToString()))
+                        {
+                            pobj.config = JsonConvert.DeserializeObject<Config>(dr["Config"].ToString());
+                        }
+                        if (pobj.config == null)
+                        {
+                            pobj.config = new Config();
+                        }
+
                         if (pobj.StoreSettings.POSSettings != null)
                         {
                             pobj.StoreSettings.POSSettings.categoriess = obj.POSSettings.categoriess;
@@ -56,7 +101,7 @@ namespace POS_Nation.Models
                         }
                         posdetails.Add(pobj);
                     }
-                
+
                 }
                 PosDetails = posdetails;
 
@@ -75,6 +120,19 @@ namespace POS_Nation.Models
         public string PosName { get; set; }
         public StoreSetting StoreSettings { get; set; }
         public string Setting { get; set; }
+        // NEW - 2026-09-18 - DB-driven per-store config (same as PTECH)
+        public Config config { get; set; }
+    }
+
+    // NEW - 2026-09-18 - Config model deserialized from DB "Config" column (ported from PTECH)
+    public class Config
+    {
+        public int StaticQty { get; set; }
+        public bool IsNegativeToPostiveQty { get; set; }
+        public bool IsRoundUp { get; set; }
+        public decimal Deposits { get; set; }
+        public bool IsDepositByPack { get; set; }
+        public bool InStockOnly { get; set; }
     }
 
     public class StoreSetting
@@ -137,5 +195,11 @@ namespace POS_Nation.Models
     {
         public string catid { get; set; }
         public string catname { get; set; }
+    }
+
+    public class DbSettings
+    {
+        public List<string> liquorappsconnectionstring { get; set; }
+
     }
 }

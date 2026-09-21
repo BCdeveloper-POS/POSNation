@@ -43,7 +43,8 @@ namespace POS_Nation
                         {
                             itemList.Add(JsonConvert.DeserializeObject<Item>(item.ToString()));
                         }
-                        POSNationcsvConverter(itemList, current.StoreSettings.StoreId, current.StoreSettings.POSSettings.tax, current.StoreSettings.POSSettings.FtpUserName, current.StoreSettings.POSSettings.FtpPassword);
+                        // NEW - 2026-09-18 - Pass DB config so new stores use DB-driven config features (old stores still use App.config)
+                        POSNationcsvConverter(itemList, current.StoreSettings.StoreId, current.StoreSettings.POSSettings.tax, current.StoreSettings.POSSettings.FtpUserName, current.StoreSettings.POSSettings.FtpPassword, current.config);
                         Console.WriteLine();
                     }
                     catch (Exception ex)
@@ -66,7 +67,7 @@ namespace POS_Nation
             try
             {
                 bool flag = Regex.IsMatch(AuthUrl, @"com$");
-                
+
                 if (flag)
                 {
                     AuthUrl += "/api/auth";
@@ -90,7 +91,7 @@ namespace POS_Nation
                     responseData = response.Content.ReadAsStringAsync().Result;
                     response.EnsureSuccessStatusCode();
                 }).Wait();
-                
+
                 var BaseUrl1 = ItemUrl;
                 flag = Regex.IsMatch(BaseUrl1, @"com$");
                 if (flag)
@@ -102,7 +103,7 @@ namespace POS_Nation
                     responseData = response.Content.ReadAsStringAsync().Result;
                     response.EnsureSuccessStatusCode();
                 }).Wait();
-               // File.WriteAllText("Invetory_Info.json", responseData);
+                // File.WriteAllText("Invetory_Info.json", responseData);
                 return responseData;
             }
             catch (Exception ex)
@@ -110,7 +111,7 @@ namespace POS_Nation
                 Console.WriteLine(ex.Message + " " + Storeid);
             }
             return "";
-        }      
+        }
         private static string ComputeSha256Hash(string rawData)
         {
             using (SHA256 sha256Hash = SHA256.Create())
@@ -125,14 +126,16 @@ namespace POS_Nation
                 return builder.ToString();
             }
         }
-        private static void POSNationcsvConverter(List<Item> productList, int storeid, decimal tax, string ftpUserName, string ftpPassword)
+        private static void POSNationcsvConverter(List<Item> productList, int storeid, decimal tax, string ftpUserName, string ftpPassword, Config config)
         {
+            // NEW - 2026-09-18 - Guard against null config so App.config-only (old) stores behave exactly as before
+            if (config == null) { config = new Config(); }
             string folderPath = ConfigurationManager.AppSettings.Get("BaseDirectory");
             string IrrespectiveQTY = ConfigurationManager.AppSettings["IrrespectiveQTY"];
             string packfilteration = ConfigurationManager.AppSettings.Get("packfilteration");
             string Deposit = ConfigurationManager.AppSettings.Get("Deposit");
-            string UOM_REMOVE = ConfigurationManager.AppSettings.Get("UOM_REMOVE");  
-            string showtoweb= ConfigurationManager.AppSettings.Get("showtoweb");
+            string UOM_REMOVE = ConfigurationManager.AppSettings.Get("UOM_REMOVE");
+            string showtoweb = ConfigurationManager.AppSettings.Get("showtoweb");
             string removeNumericPrefix = ConfigurationManager.AppSettings.Get("RemoveNumericPrefix");
             List<Modifier> xmd = new List<Modifier>();
 
@@ -165,7 +168,11 @@ namespace POS_Nation
                         }
 
                         decimal qty = Convert.ToDecimal(item.total_stock);
+                        // NEW - 2026-09-18 - DB Config: convert negative stock to positive when configured (before clamp)
+                        if (config.IsNegativeToPostiveQty && qty < 0) { qty = Math.Abs(qty); }
                         pdf.Qty = Convert.ToInt32(qty) > 0 ? Convert.ToInt32(qty) : 0;
+                        // NEW - 2026-09-18 - DB Config: static quantity override when configured
+                        if (config.StaticQty > 0) { pdf.Qty = config.StaticQty; }
                         pdf.pack = "1";
                         fdf.pack = 1;
 
@@ -215,6 +222,17 @@ namespace POS_Nation
                         {
                             continue;
                         }
+                        // NEW - 2026-09-18 - DB Config: round price up to .49/.99 when configured
+                        if (config.IsRoundUp)
+                        {
+                            if (pdf.Price > 0)
+                            {
+                                decimal whole = Math.Floor(pdf.Price);
+                                decimal cents = pdf.Price - whole;
+                                pdf.Price = cents <= 0.49M ? whole + 0.49M : whole + 0.99M;
+                                fdf.Price = pdf.Price;
+                            }
+                        }
                         pdf.Start = "";
                         pdf.End = "";
                         //fdf.pcat = item.cat_group_name.ToString().Trim();
@@ -225,19 +243,19 @@ namespace POS_Nation
                         }
                         pdf.Tax = tax;
 
-                       
-                        
 
-                            if (showtoweb.Contains(storeid.ToString()))   // to remove show to web false
+
+
+                        if (showtoweb.Contains(storeid.ToString()))   // to remove show to web false
+                        {
+                            if (item.showtoweb == "false")
                             {
-                                if (item.showtoweb == "false")
-                                {
-                                    continue;
-                                }
+                                continue;
                             }
+                        }
 
-                        
-                           if (storeid == 12256)// #38687
+
+                        if (storeid == 12256)// #38687
                         {
                             fdf.pcat = item.cat_group_name.ToString().Trim();
                             fdf.pcat1 = item.category_name.ToString().Trim();
@@ -249,7 +267,7 @@ namespace POS_Nation
                             {
                                 pdf.Tax = tax;
                             }
-                            if ((fdf.pcat.ToLower().Contains("beer") || fdf.pcat1.ToLower().Contains("beer"))&& pdf.Qty == 1)
+                            if ((fdf.pcat.ToLower().Contains("beer") || fdf.pcat1.ToLower().Contains("beer")) && pdf.Qty == 1)
                             {
                                 continue;
                             }
@@ -262,7 +280,7 @@ namespace POS_Nation
                         {
                             fdf.pcat1 = "";
                         }
-                        
+
                         fdf.pcat2 = "";
                         fdf.country = "";
                         fdf.region = "";
@@ -324,6 +342,15 @@ namespace POS_Nation
                                 }
                             }
                         }
+                        // NEW - 2026-09-18 - DB Config: deposit amount (optionally multiplied by pack) when configured
+                        if (config.Deposits > 0)
+                        {
+                            pdf.deposit = config.Deposits;
+                            if (config.IsDepositByPack)
+                            {
+                                pdf.deposit = config.Deposits * Convert.ToInt32(pdf.pack);
+                            }
+                        }
                         if (storeid == 12061)
                         {
                             if (pdf.Price.ToString().Contains(".97"))
@@ -336,11 +363,18 @@ namespace POS_Nation
                             }
                         }
 
+                        // NEW - 2026-09-18 - DB Config: skip out-of-stock items when configured
+                        if (config.InStockOnly && pdf.Qty <= 0)
+                        {
+                            continue;
+                        }
+
                         if (IrrespectiveQTY.Contains(storeid.ToString()))
                         {
                             pf.Add(pdf);
                             pd.Add(fdf);
                         }
+
                         else
                         {
                             if (pdf.Qty > 0)
